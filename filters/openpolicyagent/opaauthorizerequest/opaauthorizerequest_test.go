@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benburkert/pbench"
 	"github.com/golang-jwt/jwt/v4"
 	opasdktest "github.com/open-policy-agent/opa/sdk/test"
 	"github.com/stretchr/testify/assert"
@@ -630,7 +631,7 @@ const (
 // Usage:
 // To run a specific scenario with or without decision logging:
 //
-//	go test -bench=BenchmarkAuthorizeRequest/<scenario>/{without-decision-logging|with-decision-logging}
+//	go test -bench=BenchmarkAuthorizeRequest/<scenario>/{no-decision-logs|with-decision-logs}
 //
 // Example:
 //
@@ -639,13 +640,14 @@ const (
 // Running with multiple GOMAXPROCS values (parallel CPU execution):
 // Use the -cpu flag to simulate the benchmark under different levels of CPU parallelism:
 //
-//	go test -bench 'BenchmarkAuthorizeRequest/minimal/without-decision-logging' -cpu 1,2,4,8
+//	go test -bench 'BenchmarkAuthorizeRequest/minimal/no-decision-logs' -cpu 1,2,4,8
 //
 // Note: Refer to the code for the latest available scenarios.
 func BenchmarkAuthorizeRequest(b *testing.B) {
+
 	scenarios := []struct {
 		name          string
-		benchmarkFunc func(b *testing.B, decisionLogging bool)
+		benchmarkFunc func(pb *pbench.B, decisionLogging bool)
 	}{
 		{"minimal", benchmarkMinimal},
 		{"with-body", benchmarkAllowWithReqBody},
@@ -653,19 +655,24 @@ func BenchmarkAuthorizeRequest(b *testing.B) {
 	}
 
 	for _, scenario := range scenarios {
-		b.Run(scenario.name, func(b *testing.B) {
-			b.Run("without-decision-logging", func(b *testing.B) {
-				scenario.benchmarkFunc(b, false)
+		b.Run(scenario.name, func(tb *testing.B) {
+			pb := pbench.New(tb)
+			pb.ReportPercentile(0.5)
+			pb.ReportPercentile(0.995)
+			pb.ReportPercentile(0.999)
+
+			pb.Run("no-decision-logs", func(pb *pbench.B) {
+				scenario.benchmarkFunc(pb, false)
 			})
 
-			b.Run("with-decision-logging", func(b *testing.B) {
-				scenario.benchmarkFunc(b, true)
+			pb.Run("with-decision-logs", func(pb *pbench.B) {
+				scenario.benchmarkFunc(pb, true)
 			})
 		})
 	}
 }
 
-func benchmarkMinimal(b *testing.B, decisionLogging bool) {
+func benchmarkMinimal(b *pbench.B, decisionLogging bool) {
 	opaControlPlane := opasdktest.MustNewServer(
 		opasdktest.MockBundle("/bundles/somebundle.tar.gz", map[string]string{
 			"main.rego": `
@@ -702,16 +709,14 @@ func benchmarkMinimal(b *testing.B, decisionLogging bool) {
 	}
 
 	b.ResetTimer()
-	b.ReportAllocs()
-
-	b.RunParallel(func(pb *testing.PB) {
+	b.RunParallel(func(pb *pbench.PB) {
 		for pb.Next() {
 			f.Request(ctx)
 		}
 	})
 }
 
-func benchmarkAllowWithReqBody(b *testing.B, decisionLogging bool) {
+func benchmarkAllowWithReqBody(b *pbench.B, decisionLogging bool) {
 	opaControlPlane := opasdktest.MustNewServer(
 		opasdktest.MockBundle("/bundles/somebundle.tar.gz", map[string]string{
 			"main.rego": `
@@ -755,16 +760,14 @@ func benchmarkAllowWithReqBody(b *testing.B, decisionLogging bool) {
 	}
 
 	b.ResetTimer()
-	b.ReportAllocs()
-
-	b.RunParallel(func(pb *testing.PB) {
+	b.RunParallel(func(pb *pbench.PB) {
 		for pb.Next() {
 			f.Request(ctx)
 		}
 	})
 }
 
-func benchmarkJwtValidation(b *testing.B, decisionLogging bool) {
+func benchmarkJwtValidation(b *pbench.B, decisionLogging bool) {
 
 	publicKey, err := os.ReadFile(certPath)
 	if err != nil {
@@ -851,9 +854,7 @@ func benchmarkJwtValidation(b *testing.B, decisionLogging bool) {
 	}
 
 	b.ResetTimer()
-	b.ReportAllocs()
-
-	b.RunParallel(func(pb *testing.PB) {
+	b.RunParallel(func(pb *pbench.PB) {
 		for pb.Next() {
 			f.Request(ctx)
 			assert.False(b, ctx.FServed)
